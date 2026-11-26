@@ -31,12 +31,8 @@ import java.util.Map;
  */
 public class CallOutcomes
 {
-    /** A channel's grants this far apart, or to someone else, are different calls (as a stale call event). */
-    public static final long NEW_CALL_AFTER_MS = 3000;
-
     private final CallTally mTally;
     private final Map<String,CallOutcome> mCalls = new HashMap<>();
-    private final Map<String,Object[]> mHeard = new HashMap<>();
 
     /**
      * @param tally of the control channel
@@ -54,20 +50,6 @@ public class CallOutcomes
     public static String key(long frequency, int timeslot)
     {
         return frequency + "/" + timeslot;
-    }
-
-    /**
-     * For a manager that doesn't tell calls apart itself: whether a grant starts a new call on its channel, from who
-     * it's to and when.  A grant to someone else than the last, or after a pause, starts a new call.
-     * @param key of the channel
-     * @param to who the grant is to (talkgroup or radio), or null
-     * @param timestamp of the grant
-     */
-    public boolean isNewCall(String key, Object to, long timestamp)
-    {
-        Object[] last = mHeard.get(key);
-        mHeard.put(key, new Object[]{to, timestamp});
-        return last == null || !java.util.Objects.equals(last[0], to) || timestamp - (long)last[1] > NEW_CALL_AFTER_MS;
     }
 
     /**
@@ -97,10 +79,11 @@ public class CallOutcomes
     /**
      * No tuner could take the traffic channel started for the call on this channel: a call counted as recorded is
      * counted as noSource instead.
+     * @param key of the channel the traffic channel was started for, or null (nothing to move)
      */
     public void rejected(String key)
     {
-        if(mCalls.get(key) == CallOutcome.RECORDED)
+        if(key != null && mCalls.get(key) == CallOutcome.RECORDED)
         {
             mTally.count(CallOutcome.RECORDED, CallOutcome.NO_SOURCE);
             mCalls.put(key, CallOutcome.NO_SOURCE);
@@ -116,11 +99,14 @@ public class CallOutcomes
     }
 
     /**
-     * The control channel moved: the calls on the channels are forgotten (each was counted already).
+     * The traffic channel on a frequency stopped: the calls on its timeslots are forgotten (each was counted already),
+     * so a later rejection on the frequency can't move one of them.  Not on the manager's stop: a Capacity Plus
+     * manager carries on with the next rest channel, its traffic channels still running.
+     * @param frequency of the traffic channel
      */
-    public void clear()
+    public void forget(long frequency)
     {
-        mCalls.clear();
-        mHeard.clear();
+        String prefix = frequency + "/";
+        mCalls.keySet().removeIf(key -> key.startsWith(prefix));
     }
 }

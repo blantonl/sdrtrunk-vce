@@ -159,7 +159,8 @@ public class HealthRegistry
     }
 
     /**
-     * Tuners in use: name, kind, seconds running since the start, and frequency error left after correction.
+     * Tuners: name, kind, seconds running (with channels) since the start, and frequency error left after
+     * correction.  A tuner never in use has no seconds, and a report leaves it out.
      */
     private List<HealthSnapshot.RadioTotals> radios(long now)
     {
@@ -174,21 +175,39 @@ public class HealthRegistry
 
         for(DiscoveredTuner discovered: mTunerManager.getAvailableTuners())
         {
-            if(!discovered.hasTuner())
+            //Read once: a tuner stopped meanwhile is gone (null), and one tuner's trouble loses no other's.
+            Tuner tuner = discovered.getTuner();
+
+            if(tuner == null)
             {
                 continue;
             }
 
-            Tuner tuner = discovered.getTuner();
-            TunerController controller = tuner.getTunerController();
-            String name = tuner.getPreferredName();
-            double seconds = mTunerSeconds.merge(name, elapsed, Double::sum);
-            Double ppm = controller != null ? ppm(controller.getMeasuredFrequencyError(), controller.getFrequency()) :
-                null;
-            radios.add(new HealthSnapshot.RadioTotals(name, kind(tuner.getTunerClass()), seconds, ppm));
+            try
+            {
+                String name = tuner.getPreferredName();
+                //Running while it has channels: an enabled spare with none isn't hearing anything.
+                double seconds = mTunerSeconds.merge(name, inUse(tuner) ? elapsed : 0.0, Double::sum);
+                TunerController controller = tuner.getTunerController();
+                Double ppm = controller != null ?
+                    ppm(controller.getMeasuredFrequencyError(), controller.getFrequency()) : null;
+                radios.add(new HealthSnapshot.RadioTotals(name, kind(tuner.getTunerClass()), seconds, ppm));
+            }
+            catch(RuntimeException e)
+            {
+                LOGGER.debug("Node health: tuner left out of this snapshot", e);
+            }
         }
 
         return radios;
+    }
+
+    /**
+     * True when the tuner has channels (it's tuned for something).
+     */
+    private static boolean inUse(Tuner tuner)
+    {
+        return tuner.getChannelSourceManager() != null && tuner.getChannelSourceManager().getTunerChannelCount() > 0;
     }
 
     /**

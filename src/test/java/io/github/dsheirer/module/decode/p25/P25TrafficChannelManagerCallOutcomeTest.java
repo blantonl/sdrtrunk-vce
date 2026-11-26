@@ -128,6 +128,35 @@ class P25TrafficChannelManagerCallOutcomeTest
         return identifiers;
     }
 
+    /**
+     * A P25 control channel's calls are counted from its first grant, and a conventional P25 channel's (its decoder's
+     * private manager) never: a report gives it as a channel whatever control messages it decodes, not as a deaf site.
+     */
+    @Test
+    void calls_are_counted_from_the_first_grant_and_never_on_a_conventional_channel()
+    {
+        Channel trunked = new Channel("P25 counted at the first grant");
+        trunked.setDecodeConfiguration(new DecodeConfigP25Phase1());
+        P25TrafficChannelManager manager = new P25TrafficChannelManager(trunked);
+        manager.processFrequencyBand(band());
+        manager.processFrequencyBand(band());
+        manager.setInterModuleEventBus(new EventBus());
+        io.github.dsheirer.health.ChannelHealth health = HealthRegistry.getInstance().channel(trunked);
+        org.junit.jupiter.api.Assertions.assertNull(health.totals(0).calls(), "no grant: not counted");
+        new Site(manager, new Starter(), null).grant(1, 100, 1_000);
+        assertEquals(1, health.totals(0).calls().started());
+
+        Channel conventional = new Channel("P25 conventional");
+        conventional.setDecodeConfiguration(new io.github.dsheirer.module.decode.p25.phase1.DecodeConfigP25Conventional());
+        P25TrafficChannelManager own = new P25TrafficChannelManager(conventional);
+        own.processFrequencyBand(band());
+        own.processFrequencyBand(band());
+        own.setInterModuleEventBus(new EventBus());
+        new Site(own, new Starter(), null).grant(1, 100, 1_000);
+        org.junit.jupiter.api.Assertions.assertNull(HealthRegistry.getInstance().channel(conventional).totals(0).calls());
+        assertEquals("p25", HealthRegistry.getInstance().channel(conventional).totals(0).info().mode());
+    }
+
     @Test
     void a_followed_call_is_counted_once_however_many_grants_it_has()
     {

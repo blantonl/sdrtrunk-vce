@@ -55,11 +55,13 @@ class DMRTrafficChannelManagerCallOutcomeTest
         private DMRTrafficChannelManager mManager;
         private boolean mNoTuner;
         private int mRequests;
+        private Channel mLastChannel;
 
         @Subscribe
         public void start(ChannelStartProcessingRequest request)
         {
             mRequests++;
+            mLastChannel = request.getChannel();
 
             if(mNoTuner)
             {
@@ -138,6 +140,27 @@ class DMRTrafficChannelManagerCallOutcomeTest
         assertEquals(1, site.calls().getStarted());
         assertEquals(1, site.calls().get(CallOutcome.NO_SOURCE), "rejected while it was requested");
         assertEquals(0, site.calls().get(CallOutcome.RECORDED));
+    }
+
+    /**
+     * A rejection moves only the call its traffic channel was requested for: an earlier call on the frequency's other
+     * timeslot, recorded on a traffic channel that has since stopped, stays recorded.
+     */
+    @Test
+    void a_rejected_call_leaves_the_other_timeslots_recorded_call_alone()
+    {
+        Site site = site("DMR rejected, other timeslot", 2, false);
+        site.grant(1, 2, FREQUENCY_1, 92, 1_000);
+        site.manager().getChannelEventListener().receive(new ChannelEvent(site.starter().mLastChannel,
+            ChannelEvent.Event.NOTIFICATION_PROCESSING_STOP));
+
+        site.starter().mNoTuner = true;
+        site.grant(1, 1, FREQUENCY_1, 91, 10_000);
+
+        assertEquals(2, site.starter().mRequests);
+        assertEquals(2, site.calls().getStarted());
+        assertEquals(1, site.calls().get(CallOutcome.RECORDED), "timeslot 2's call, recorded before");
+        assertEquals(1, site.calls().get(CallOutcome.NO_SOURCE), "timeslot 1's, rejected");
     }
 
     @Test

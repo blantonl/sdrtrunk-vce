@@ -295,7 +295,6 @@ public class P25TrafficChannelManager extends TrafficChannelManager implements I
         mParentChannel = parentChannel;
         mWuidConfigurationId = parentChannel.getConfigurationId();
         mGrantAllocationEnabled = !(parentChannel.getSourceConfiguration() instanceof SourceConfigRemote);
-        calls(); //This control channel's calls are counted (node health reports), unless another node's are mirrored
         mVoiceDecryptionModuleLoaded = Objects.requireNonNull(voiceDecryptionModuleLoaded);
         mBandplanOverrideRegistry = bandplanOverrideRegistry != null ? bandplanOverrideRegistry :
             P25BandplanOverrideRegistry.empty();
@@ -2746,11 +2745,14 @@ public class P25TrafficChannelManager extends TrafficChannelManager implements I
 
     /**
      * Calls this control channel announced and what became of each, for node health reports, or null when it doesn't
-     * start traffic channels itself (a remote mirror: the node that does counts them).
+     * start traffic channels itself (a remote mirror: the node that does counts them) or isn't a control channel (a
+     * conventional P25 channel's private manager).  Counted from the first grant, as on DMR and NXDN, so a channel
+     * that never grants one is reported as a channel, never as a trunked site with no calls.
      */
     private CallTally calls()
     {
-        if(!mGrantAllocationEnabled)
+        if(!mGrantAllocationEnabled || mParentChannel.getDecodeConfiguration() != null &&
+            mParentChannel.getDecodeConfiguration().getDecoderType() == DecoderType.P25_CONVENTIONAL)
         {
             return null;
         }

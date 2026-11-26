@@ -87,7 +87,8 @@ public class ChannelHealthTest
 
         health.stopped(13_000);
         totals = health.totals(20_000);
-        assertEquals(2, totals.closes(), "stopping closes an open channel");
+        assertEquals(1, totals.closes(), "a transmission cut off by stopping isn't one completed");
+        assertEquals(3_000 + 3_000, totals.openMs(), "its time open counts, to the stop");
         assertEquals(13_000, totals.runningMs(), "not running after it stopped");
     }
 

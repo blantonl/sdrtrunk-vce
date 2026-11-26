@@ -136,6 +136,8 @@ public class DMRTrafficChannelManager extends TrafficChannelManager implements I
     private final BooleanSupplier mVoiceDecryptionModuleLoaded;
     private final boolean mTrunkingEnabled;
     private final CallOutcomes mCallOutcomes;
+    /** The call each traffic channel was requested for, by frequency, until it stops or is rejected. */
+    private final Map<Long,String> mRequestedCalls = new ConcurrentHashMap<>();
     private ChannelActivityModel mChannelActivityModel;
     private volatile boolean mTrunkedActivityObserved;
     private volatile DMRNetworkConfigurationSnapshot mLatestNetworkConfigurationSnapshot;
@@ -1285,6 +1287,7 @@ public class DMRTrafficChannelManager extends TrafficChannelManager implements I
                             request.addPreloadDataContent(new DMRChannelGrantPreloadData(event));
                             trafficStartRequest = request;
                             trafficStartKey = callKey;
+                            mRequestedCalls.put(frequency, callKey);
                         }
                     }
                     else
@@ -1687,6 +1690,12 @@ public class DMRTrafficChannelManager extends TrafficChannelManager implements I
                 IDecodeEvent timeslotOne = mCallEventsTS1.remove(frequency);
                 IDecodeEvent timeslotTwo = mCallEventsTS2.remove(frequency);
                 long endedAt = System.currentTimeMillis();
+                mRequestedCalls.remove(frequency);
+
+                if(mCallOutcomes != null)
+                {
+                    mCallOutcomes.forget(frequency);
+                }
 
                 if(timeslotOne != null)
                 {
@@ -1714,8 +1723,9 @@ public class DMRTrafficChannelManager extends TrafficChannelManager implements I
 
             try
             {
-                tallyRejected(CallOutcomes.key(frequency, 1));
-                tallyRejected(CallOutcomes.key(frequency, 2));
+                //Only the call the traffic channel was requested for: the other timeslot's last call (on an earlier
+                //traffic channel, or this one before it stopped) was counted already.
+                tallyRejected(mRequestedCalls.remove(frequency));
 
                 IDecodeEvent event = mCallEventsTS1.get(frequency);
 

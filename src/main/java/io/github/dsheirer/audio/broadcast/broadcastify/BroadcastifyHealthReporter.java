@@ -86,6 +86,8 @@ public class BroadcastifyHealthReporter
     private final String mUrl;
     private final int mSystemId;
     private final HttpClient mHttpClient;
+    /** Stopped: a check already under way sends nothing (a new node may have started for the system ID). */
+    private volatile boolean mStopped;
     private final Map<String,Destination> mDestinations = new LinkedHashMap<>();
     private volatile NodeReporter mReporter;
     private ScheduledFuture<?> mFuture;
@@ -132,15 +134,29 @@ public class BroadcastifyHealthReporter
         {
             int systemId = configuration.getSystemID();
             BroadcastifyHealthReporter node = NODES.computeIfAbsent(key(url, systemId), key ->
-                new BroadcastifyHealthReporter(url, systemId, HttpClient.newBuilder()
-                    .version(HttpClient.Version.HTTP_2)
-                    .followRedirects(HttpClient.Redirect.NORMAL)
-                    .connectTimeout(Duration.ofSeconds(20))
-                    .build(), new NodeReporter(String.valueOf(systemId))));
+                new BroadcastifyHealthReporter(url, systemId, httpClient(),
+                    new NodeReporter(String.valueOf(systemId))));
             node.add(configuration, aliasModel);
             node.start();
             return node;
         }
+    }
+
+    /** One HTTP client for every node, made at the first: a destination that restarts alone doesn't make another. */
+    private static HttpClient sHttpClient;
+
+    private static synchronized HttpClient httpClient()
+    {
+        if(sHttpClient == null)
+        {
+            sHttpClient = HttpClient.newBuilder()
+                .version(HttpClient.Version.HTTP_2)
+                .followRedirects(HttpClient.Redirect.NORMAL)
+                .connectTimeout(Duration.ofSeconds(20))
+                .build();
+        }
+
+        return sHttpClient;
     }
 
     /**
@@ -236,6 +252,8 @@ public class BroadcastifyHealthReporter
 
     private synchronized void stop()
     {
+        mStopped = true;
+
         if(mFuture != null)
         {
             mFuture.cancel(true);
@@ -397,6 +415,11 @@ public class BroadcastifyHealthReporter
 
     private void send(NodeReporter reporter, JsonObject report, HealthSnapshot now)
     {
+        if(mStopped)
+        {
+            return; //Stopped while the report was made
+        }
+
         int systemId = mSystemId;
         HttpResponse<String> response;
 

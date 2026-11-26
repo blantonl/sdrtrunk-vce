@@ -98,7 +98,8 @@ public class ChannelHealth
     }
 
     /**
-     * The channel stopped processing.
+     * The channel stopped processing.  An open squelch is cut off: its time counts as open, but it isn't counted as
+     * a transmission completed.
      */
     public synchronized void stopped(long now)
     {
@@ -108,7 +109,11 @@ public class ChannelHealth
             mRunning = false;
         }
 
-        closed(now);
+        if(mOpenedAt > 0)
+        {
+            mOpenMs += Math.max(0, now - mOpenedAt);
+            mOpenedAt = 0;
+        }
     }
 
     /**
