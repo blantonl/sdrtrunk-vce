@@ -172,7 +172,7 @@ public class HealthMonitor extends Module implements IMessageListener, ISquelchS
     {
         if(message instanceof TSBKMessage tsbk)
         {
-            mHealth.control("p25", tsbk.isValid(), tsbk.getTimestamp());
+            mHealth.control("p25", tsbk.isValid(), tsbk.getTimestamp(), System.currentTimeMillis());
 
             if(tsbk.isValid())
             {
@@ -187,7 +187,7 @@ public class HealthMonitor extends Module implements IMessageListener, ISquelchS
             if(key != mLastLcchKey)
             {
                 mLastLcchKey = key;
-                mHealth.control("p25", mac.isValid(), mac.getTimestamp());
+                mHealth.control("p25", mac.isValid(), mac.getTimestamp(), System.currentTimeMillis());
             }
         }
         else if(mDecoderType == DecoderType.DMR && message instanceof DataMessage data)
@@ -196,16 +196,17 @@ public class HealthMonitor extends Module implements IMessageListener, ISquelchS
             //chose to ignore CRCs.
             boolean valid = data.getSlotType() != null && data.getSlotType().isValid() &&
                 (data.isValid() || mIgnoreDmrCrcChecksums);
-            mHealth.control("dmr", valid, data.getTimestamp());
+            mHealth.control("dmr", valid, data.getTimestamp(), System.currentTimeMillis());
         }
         else if(mDecoderType == DecoderType.NXDN && message instanceof NXDNMessage nxdn &&
             nxdn.isRfFrameQualityCarrier())
         {
-            mHealth.control("nxdn", nxdn.isRfFrameValid(), nxdn.getTimestamp());
+            mHealth.control("nxdn", nxdn.isRfFrameValid(), nxdn.getTimestamp(), System.currentTimeMillis());
         }
         else if(message instanceof SyncLossMessage syncLoss && mProtocol != null)
         {
-            mHealth.syncLoss(Math.max(0, syncLoss.getBitsProcessed()) / BITS_PER_SYMBOL);
+            mHealth.syncLoss(Math.max(0, syncLoss.getBitsProcessed()) / BITS_PER_SYMBOL, syncLoss.getTimestamp(),
+                System.currentTimeMillis());
         }
     }
 

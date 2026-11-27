@@ -68,7 +68,8 @@ import org.slf4j.LoggerFactory;
 public class BroadcastifyHealthReporter
 {
     private static final Logger LOGGER = LoggerFactory.getLogger(BroadcastifyHealthReporter.class);
-    private static final long CHECK_INTERVAL_MS = 10_000;
+    /** How often the node looks whether its report is due: it goes within a second of when it is. */
+    private static final long CHECK_INTERVAL_MS = 1_000;
     /** How often, and over how long, the node's sites are looked at for the several-sites warning. */
     private static final long SITES_CHECK_MS = 60_000;
     private static final String APPLY_URL = "https://www.broadcastify.com/apply/calls";
@@ -237,7 +238,7 @@ public class BroadcastifyHealthReporter
     }
 
     /**
-     * Starts checking, every 10 seconds, whether the node's next report is due.
+     * Starts checking, every second, whether the node's next report is due.
      */
     private synchronized void start()
     {
@@ -312,7 +313,19 @@ public class BroadcastifyHealthReporter
 
     private void check()
     {
-        check(HealthRegistry.getInstance().getHistory());
+        HealthRegistry registry = HealthRegistry.getInstance();
+        HealthHistory history = registry.getHistory();
+        Long nextAt = mReporter.getNextAt();
+        HealthSnapshot latest = history.latest();
+
+        //Due between snapshots (they're 10 s apart): the window ends now, at one taken for it, not at the next.
+        if(nextAt != null && latest != null && latest.timeMs() < nextAt && System.currentTimeMillis() >= nextAt &&
+            !mReporter.isStopped() && !destinations().isEmpty())
+        {
+            registry.snapshotNow();
+        }
+
+        check(history);
     }
 
     /**

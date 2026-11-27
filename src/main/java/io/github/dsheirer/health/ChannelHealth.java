@@ -35,6 +35,8 @@ public class ChannelHealth
 {
     /** A control channel counts as locked until this long after its last good message. */
     public static final long LOCK_HOLD_MS = 2000;
+    /** A decoder that has said nothing (no message, no sync loss) for this long isn't locked. */
+    public static final long SILENT_MS = 10_000;
 
     private final ChannelInfo mInfo;
     private final CallTally mCalls = new CallTally();
@@ -49,6 +51,8 @@ public class ChannelHealth
     private boolean mSyncLossMeasured;
     private long mLockedMs;
     private long mLastGood;
+    private long mLastHeard;
+    private long mLastHeardAt;
 
     private boolean mRunning;
     private long mRunningMs;
@@ -125,14 +129,25 @@ public class ChannelHealth
     }
 
     /**
-     * A control message was framed.
-     * @param protocol of the site, as a node health report names it (p25, dmr, ...)
-     * @param valid true when it decoded, false when it failed its CRC or FEC
-     * @param timestamp of the message
+     * A control message was framed, as it arrives (a message's timestamp in a test).
      */
     public synchronized void control(String protocol, boolean valid, long timestamp)
     {
+        control(protocol, valid, timestamp, timestamp);
+    }
+
+    /**
+     * A control message was framed.
+     * @param protocol of the site, as a node health report names it (p25, dmr, ...)
+     * @param valid true when it decoded, false when it failed its CRC or FEC
+     * @param timestamp of the message: when its samples were received, which falls behind the time it's decoded by
+     *                  however long the samples waited to be processed
+     * @param arrivedAt when the decoder gave it, Unix milliseconds
+     */
+    public synchronized void control(String protocol, boolean valid, long timestamp, long arrivedAt)
+    {
         mProtocol = protocol;
+        heard(timestamp, arrivedAt);
 
         if(valid)
         {
@@ -160,10 +175,36 @@ public class ChannelHealth
     }
 
     /**
+     * The decoder said something, at a time on its messages' clock: a message, or that it went without sync.
+     */
+    private void heard(long timestamp, long arrivedAt)
+    {
+        mLastHeard = Math.max(mLastHeard, timestamp);
+        mLastHeardAt = Math.max(mLastHeardAt, arrivedAt);
+    }
+
+    /**
      * The control channel's decoder went without frame sync.
      * @param symbols it went through without sync
      */
     public synchronized void syncLoss(long symbols)
+    {
+        addSyncLoss(symbols);
+    }
+
+    /**
+     * The control channel's decoder went without frame sync.
+     * @param symbols it went through without sync
+     * @param timestamp of the sync loss message
+     * @param arrivedAt when the decoder gave it, Unix milliseconds
+     */
+    public synchronized void syncLoss(long symbols, long timestamp, long arrivedAt)
+    {
+        heard(timestamp, arrivedAt);
+        addSyncLoss(symbols);
+    }
+
+    private void addSyncLoss(long symbols)
     {
         if(symbols > 0)
         {
@@ -218,7 +259,10 @@ public class ChannelHealth
             locked += Math.min(now - mLastGood, LOCK_HOLD_MS);
         }
 
-        boolean lockedNow = mRunning && mLastGood > 0 && now - mLastGood <= LOCK_HOLD_MS;
+        //Locked now: the decoder's latest word was within 2 s of a good message, on its messages' own clock (they
+        //run behind this one by however long samples wait to be processed), and it's still saying something.
+        boolean lockedNow = mRunning && mLastGood > 0 && mLastHeard - mLastGood <= LOCK_HOLD_MS &&
+            now - mLastHeardAt <= SILENT_MS;
         long running = mRunningMs + (mRunning ? Math.max(0, now - mRunningSince) : 0);
         long open = mOpenMs + (mOpenedAt > 0 ? Math.max(0, now - mOpenedAt) : 0);
 
@@ -255,8 +299,8 @@ public class ChannelHealth
      * @param syncLossSym symbols the control channel's decoder went through without frame sync, or null when its
      *                    decoder doesn't say
      * @param lockedMs milliseconds with a good control message within the last 2 s
-     * @param locked true when there was a good control message within the last 2 s at this moment: false while the
-     *               channel hunts for its control channel
+     * @param locked true when the decoder's latest message (or sync loss) came within 2 s of a good control message
+     *               and it gave one within the last 10 s: false while the channel hunts for its control channel
      * @param calls announced, and their outcomes, or null when nothing counts them
      * @param runningMs milliseconds the channel was processing
      * @param opens squelch openings
